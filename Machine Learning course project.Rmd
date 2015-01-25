@@ -80,7 +80,7 @@ dim(validation)
 
 ```
 
-```{r, echo=FALSE}
+```{r, results='hide'}
 # Results are hidden due to the large size of the dataset 
 names(training)
 summary(training)
@@ -102,7 +102,7 @@ Not all of the variables in this dataset will be useful predictors in our model.
 - Time measures
 - Have low variance
 
-```{r, echo=TRUE}
+```{r, results='hide'}
 # Exploring how many NA values are in each column
 colSums(is.na(training))
 
@@ -128,18 +128,19 @@ train$classe <- as.factor(train$classe)
 ### Data Partitioning
 
 ```{r}
-library(rpart)
-
 # setting the overall seed for reproducibility
 set.seed(321123)
 
 # Checking for near zero value variables
 library(caret)
+library(rpart)
+
 nzero <- nearZeroVar(train, saveMetrics=TRUE)
 if (any(nzero$nzero)) nzero else message("No variables with near zero variance")
 
 # Cleaning the Environment
-rm(nzero, training, validation, trainset, val_no_na, testing)
+rm(nzero, training, validation, trainset, val_no_na)
+
 ```
   
 In this step we separate the training data into a training set and a test set that we will use to check our model. The following scripts load the training data and splits it into training (70%) and testing (30%) data sets.
@@ -156,12 +157,11 @@ test_set <- train[-trainsplit, ]
 We then train a model using the `Random Forest`, `SVM Radial`, `Classification tree`, and `Neural Nets` algorithms. We use the trControl option and pass a `trainControl` object to set  four folds cross-validation and PCA pre-processing.
   
 ```{r}
-# To avoid overfitting and to reduce out of sample errors, we checked variables correlation and included the PCA pre-processing.
-
-corr <- findCorrelation(cor(train_set[, -53]), cutoff=0.8)
+# To avoid overfitting and to reduce out of sample errors, we checked variables correlation and included the PCA pre-processing in trainControl.
+corr <- findCorrelation(cor(train_set[, -53]), cutoff = .75)
 names(train_set)[corr]
 
-tr_control <-  trainControl(method = "cv", number = 4, preProcOptions="pca", classProbs=TRUE, savePred = TRUE, allowParallel=TRUE)
+tr_control <-  trainControl(method = "cv", number = 4, preProc = "pca" , classProbs = TRUE, savePred = TRUE, allowParallel = TRUE)
 
 # Setting parameters for multicore
 library(doMC)
@@ -172,7 +172,7 @@ library(randomForest)
 rf <- train(classe ~ ., data = train_set, method = "rf", trControl = tr_control)
 
 library(kernlab)
-svmR <- train(classe ~ ., data = train_set, method = "svmRadial", tuneLength = 15, trControl = tr_control)
+svmR <- train(classe ~ ., data = train_set, method = "svmRadial", trControl = tr_control)
 
 ctree <- train(classe ~ ., data = train_set, method = "ctree", trControl = tr_control)
 
@@ -203,6 +203,7 @@ performance <- cbind(Model, Accuracy, Kappa)
 performance
 
 ```
+From the results above we see that random forest is the model with the highest Accuracy and Kappa values, so we choose this method to fit our test data set.
 
 ### Cross-Validation
 
@@ -213,7 +214,7 @@ Cross-validaiton is used to estimate the model out of sample error. Using the cr
 pred <- predict(rf, newdata = test_set)
 confusionMatrix(test_set$classe, pred)
 ```
-The accuracy of the model is **99.37%** with a confidence interval between **99.13-99.56%.**
+The accuracy of the model is **99.32%** with a confidence interval between **99.13-99.56%.**
 
 ### Prediction for Original Test Set
 We now use our model on the original test set to see how well our model predicts the classe outcome for each observation. This final step will allow us to predict the quality of weight lifting exercises from the accelerometer data.

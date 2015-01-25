@@ -1,0 +1,224 @@
+---
+title: "Practical Machine Learning Course Project"
+output: html_document
+---
+
+
+### Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+#### Data
+The information on the dataset are available on this link [Weight Lifting Exercise Dataset](http://groupware.les.inf.puc-rio.br/har).
+The data for this project are available here: [Training data set](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [Test data set](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+
+### Overview
+  
+We will be using classe, a factor variable with 5 levels, as the outcome variable. The levels for this variable are:
+
+- Exactly according to the specification (Class A)
+- Throwing the elbows to the front (Class B)
+- Llifting the dumbbell only halfway (Class C)
+- Lowering the dumbbell only halfway (Class D)
+- Throwing the hips to the front (Class E)
+
+Class A represents the correct execution of the exercise, while the other four classes correspond to any wrong execution of the excercise.
+
+
+### How the model is built
+The Trainig data set is split in two random samples - without replacement - such as that 70% goes to a new training set and 30% goes to the cross-validation data set. This approach allows us to perform cross-validaiton to estimate our model’s out of sample error.
+
+
+### Cross-validation
+We use cross-validaiton to estimate our model’s out of sample error and predict classe with our final model and compare the results to the true outcome. Then, we report the out of sample error using the `confusionMatrix` function.
+
+
+### Expected out-of-sample error
+This measure will correspond to the accuracy - proportion of correctly classified observations over the total number of observations - in the cross-validation data.
+
+
+### Reasons for the model choice
+Three models will be tested using random forest, support vector machine, classification tree and neural nets algorithms. The prediction variables included in the model will be evaluated according to highest accuracy and minimum out-of-sample error. Finally, the model with the highest accuracy will be chosen as the final model to test against the validation data set.
+
+
+### Methodology
+In order to perform cross-validation the data is preprocessed to find variables relevant to the model and formatted in a way that a classifier can be run on the data.
+
+The model developed follows these principles of cross-validation: 
+1. Use the training set
+2. Split it into training/test sets
+3. Build a model on the training set
+4. Evaluate the model on the test set
+5. Repeat and average the estimated errors
+
+
+## Preliminary steps
+
+#### Loading data
+```{r LoadData, cache=TRUE}
+urlTrain <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+if(!file.exists("pml-training.csv")){
+        download.file(urlTrain, "pml-training.csv")
+}
+training <- read.csv("pml-training.csv", na.strings = c("NA","#DIV/0!", ""))
+
+urlTest <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!file.exists("pml-testing.csv")){
+        download.file(urlTest, "pml-testing.csv")
+}
+validation <- read.csv("pml-testing.csv")
+
+```
+
+#### Looking at basic information on the dataset
+  
+```{r}
+dim(training)
+dim(validation)
+
+```
+
+```{r, echo=FALSE}
+# Results are hidden due to the large size of the dataset 
+names(training)
+summary(training)
+head(training)
+summary(training)
+head(validation)
+
+```
+
+#### Pre-processing
+  
+Not all of the variables in this dataset will be useful predictors in our model. Therefore, to prepare our dataset for model building, we remove the predictor variables that meet these criteria:
+
+- Does not seem a sensor reading
+- It is unclear how it is measured
+- The vast majority of values are missing
+- Related to the sequence of the experiments such that it predicts `classe`.
+- ID information with no predictive value
+- Time measures
+- Have low variance
+
+```{r, echo=TRUE}
+# Exploring how many NA values are in each column
+colSums(is.na(training))
+
+# Deleting columns with missing values
+trainset <- training[, colSums(is.na(training)) == 0]
+val_no_na <- validation[, colSums(is.na(validation)) == 0]
+
+names(trainset)
+names(val_no_na)
+
+# Removing columns with no predicting value
+train <- trainset[, -(1:7)]
+val_final <- val_no_na[, -(1:7)]
+
+# Setting Classe as factor variable
+train$classe <- as.factor(train$classe)
+
+```
+
+
+## Model Building
+
+### Data Partitioning
+
+```{r}
+library(rpart)
+
+# setting the overall seed for reproducibility
+set.seed(321123)
+
+# Checking for near zero value variables
+library(caret)
+nzero <- nearZeroVar(train, saveMetrics=TRUE)
+if (any(nzero$nzero)) nzero else message("No variables with near zero variance")
+
+# Cleaning the Environment
+rm(nzero, training, validation, trainset, val_no_na, testing)
+```
+  
+In this step we separate the training data into a training set and a test set that we will use to check our model. The following scripts load the training data and splits it into training (70%) and testing (30%) data sets.
+
+```{r}
+# Splitting the Training data set in train and cross-validation data sets
+trainsplit <- createDataPartition(train$classe, p = .7, list = FALSE)
+train_set <- train[trainsplit, ]
+test_set <- train[-trainsplit, ]
+
+```
+
+### Model Fit
+We then train a model using the `Random Forest`, `SVM Radial`, `Classification tree`, and `Neural Nets` algorithms. We use the trControl option and pass a `trainControl` object to set  four folds cross-validation and PCA pre-processing.
+  
+```{r}
+# To avoid overfitting and to reduce out of sample errors, we checked variables correlation and included the PCA pre-processing.
+
+corr <- findCorrelation(cor(train_set[, -53]), cutoff=0.8)
+names(train_set)[corr]
+
+tr_control <-  trainControl(method = "cv", number = 4, preProcOptions="pca", classProbs=TRUE, savePred = TRUE, allowParallel=TRUE)
+
+# Setting parameters for multicore
+library(doMC)
+registerDoMC()
+
+# Training the models
+library(randomForest)
+rf <- train(classe ~ ., data = train_set, method = "rf", trControl = tr_control)
+
+library(kernlab)
+svmR <- train(classe ~ ., data = train_set, method = "svmRadial", tuneLength = 15, trControl = tr_control)
+
+ctree <- train(classe ~ ., data = train_set, method = "ctree", trControl = tr_control)
+
+library(nnet)
+nn <- train(classe ~ ., data = train_set, method = "nnet", trControl = tr_control)
+```
+
+##### We then check the performance of the trained models and compare the results to choose the best model to run on the test data set.
+```{r}
+# Checking performance on test data set
+
+Model <- c("Random Forest", "SVM Radial", "Class. Tree", "Neural Nets")
+
+Accuracy <- c(max(rf$results$Accuracy),
+        max(svmR$results$Accuracy),
+        max(ctree$results$Accuracy),
+        max(nn$results$Accuracy))
+        
+
+Kappa <- c(max(rf$results$Kappa),
+        max(svmR$results$Kappa),
+        max(ctree$results$Accuracy),
+        max(nn$results$Kappa))
+        
+
+# Copmaring the models performance on the training data set
+performance <- cbind(Model, Accuracy, Kappa)
+performance
+
+```
+
+### Cross-Validation
+
+#### Out of Sample Error
+Cross-validaiton is used to estimate the model out of sample error. Using the cross-validation data set partitioned earlier, we predict classe with our final model and compare the results to the true outcome. We report the out of sample error using the `confusionMatrix` function.
+
+```{r}
+pred <- predict(rf, newdata = test_set)
+confusionMatrix(test_set$classe, pred)
+```
+The accuracy of the model is **99.37%** with a confidence interval between **99.13-99.56%.**
+
+### Prediction for Original Test Set
+We now use our model on the original test set to see how well our model predicts the classe outcome for each observation. This final step will allow us to predict the quality of weight lifting exercises from the accelerometer data.
+
+```{r}
+final_pred <- predict(rf, newdata = val_final)
+final_pred
+```

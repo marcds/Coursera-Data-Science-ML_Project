@@ -194,7 +194,7 @@ Accuracy <- c(max(rf$results$Accuracy),
 
 Kappa <- c(max(rf$results$Kappa),
         max(svmR$results$Kappa),
-        max(ctree$results$Accuracy),
+        max(ctree$results$Kappa),
         max(nn$results$Kappa))
         
 
